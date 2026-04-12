@@ -6,10 +6,12 @@ import { FoodSafetyAppClient, FoodSafetyAppFactory } from '../contracts/FoodSafe
 import algosdk from 'algosdk'
 import { getAlgodConfigFromViteEnvironment, getIndexerConfigFromViteEnvironment } from '../utils/network/getAlgoClientConfigs'
 import { pinJSONToIPFS, pinFileToIPFS } from '../utils/pinata'
+import { Role, ROLES, ROLE_ACTIONS } from '../types/roles'
 
 interface FoodSafetyProps {
   openModal: boolean
   closeModal: () => void
+  role: Role | null
 }
 
 type BatchStatus = 'CREATED' | 'APPROVED' | 'REJECTED' | 'DISTRIBUTED' | 'RECALLED'
@@ -33,7 +35,7 @@ const STATUS_MAP: Record<number, BatchStatus> = {
   5: 'RECALLED',
 }
 
-const FoodSafety = ({ openModal, closeModal }: FoodSafetyProps) => {
+const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
   const { enqueueSnackbar } = useSnackbar()
   const { activeAddress, transactionSigner } = useWallet()
   const algodConfig = getAlgodConfigFromViteEnvironment()
@@ -67,10 +69,9 @@ const FoodSafety = ({ openModal, closeModal }: FoodSafetyProps) => {
   const [viewBatchId, setViewBatchId] = useState<string>('')
   const [batchInfo, setBatchInfo] = useState<BatchInfo | null>(null)
   const [funding, setFunding] = useState<boolean>(false)
+  const allowedActions = role ? ROLE_ACTIONS[role] : []
 
-  useEffect(() => {
-    algorand.setDefaultSigner(transactionSigner)
-  }, [algorand, transactionSigner])
+  const canPerformAction = (action: string) => allowedActions.includes(action)
 
   const fundAccount = async () => {
     try {
@@ -100,6 +101,7 @@ const FoodSafety = ({ openModal, closeModal }: FoodSafetyProps) => {
   }
 
   const deployContract = async () => {
+    if (role !== 'supplier') throw new Error('Only suppliers can deploy contracts')
     try {
       if (!activeAddress) throw new Error('Connect wallet')
       setDeploying(true)
@@ -115,98 +117,10 @@ const FoodSafety = ({ openModal, closeModal }: FoodSafetyProps) => {
     }
   }
 
-  const deployAndCreateBatch = async () => {
-    let ipfsHash = ''
-    let harvestTimestamp = 0
-    
-    try {
-      if (!activeAddress || !transactionSigner) throw new Error('Connect wallet')
-      if (!batchId || !productName || !originLocation || !harvestDate) {
-        throw new Error('Fill all batch fields')
-      }
-      
-      setDeploying(true)
-      setLoading(true)
-      
-      console.log('Deploying and creating batch with account:', activeAddress)
-      
-      // Upload file to IPFS if provided
-      if (ipfsFile) {
-        const result = await pinFileToIPFS(ipfsFile)
-        ipfsHash = result.IpfsHash
-      }
-      
-      harvestTimestamp = Math.floor(new Date(harvestDate).getTime() / 1000)
-      
-      // Set the signer
-      algorand.setDefaultSigner(transactionSigner)
-      
-      // Step 1: Deploy the contract
-      const factory = new FoodSafetyAppFactory({ 
-        defaultSender: activeAddress, 
-        algorand,
-      })
-      
-      const deployResult = await factory.send.create.bare({
-        sender: activeAddress,
-      })
-      
-      const newId = Number(deployResult.appClient.appId)
-      setAppId(newId)
-      
-      enqueueSnackbar(`Contract deployed! App ID: ${newId}. Creating batch...`, { variant: 'info' })
-      
-      // Step 2: Get app address and send MBR payment
-      const appAddress = algosdk.getApplicationAddress(newId)
-      const boxMBR = 300000 // 0.3 ALGO
-      
-      console.log('Sending MBR payment to app address:', appAddress)
-      
-      await algorand.send.payment({
-        sender: activeAddress,
-        receiver: appAddress,
-        amount: { microAlgo: boxMBR },
-        signer: transactionSigner,
-      })
-      
-      // Step 3: Create batch
-      const client = new FoodSafetyAppClient({
-        appId: BigInt(newId),
-        sender: activeAddress,
-        algorand,
-      })
-      
-      await client.send.createBatch({
-        args: {
-          batchId,
-          producerAddress: activeAddress,
-          productName,
-          originLocation,
-          harvestDate: BigInt(harvestTimestamp),
-          ipfsHash: ipfsHash || '',
-        },
-        sender: activeAddress,
-        signer: transactionSigner,
-      })
-      
-      enqueueSnackbar(`Success! Contract ${newId} deployed and batch ${batchId} created!`, { variant: 'success' })
-      setBatchId('')
-      setProductName('')
-      setOriginLocation('')
-      setHarvestDate('')
-      setIpfsFile(null)
-    } catch (e) {
-      const errorMsg = (e as Error).message
-      console.error('Deploy and create error:', errorMsg)
-      console.error('Account used:', activeAddress)
-      enqueueSnackbar(`Failed: ${errorMsg}`, { variant: 'error' })
-    } finally {
-      setDeploying(false)
-      setLoading(false)
-    }
-  }
+
 
   const createBatch = async () => {
+    if (role !== 'supplier') throw new Error('Only suppliers can create batches')
     let ipfsHash = ''
     let harvestTimestamp = 0
     
@@ -289,6 +203,7 @@ const FoodSafety = ({ openModal, closeModal }: FoodSafetyProps) => {
   }
 
   const inspectBatch = async () => {
+    if (role !== 'approver') throw new Error('Only approvers can inspect batches')
     try {
       if (!activeAddress || !transactionSigner) throw new Error('Connect wallet')
       if (!appId || appId <= 0) throw new Error('Enter valid App ID')
@@ -338,6 +253,7 @@ const FoodSafety = ({ openModal, closeModal }: FoodSafetyProps) => {
   }
 
   const distributeBatch = async () => {
+    if (role !== 'distributor') throw new Error('Only distributors can distribute batches')
     try {
       if (!activeAddress || !transactionSigner) throw new Error('Connect wallet')
       if (!appId || appId <= 0) throw new Error('Enter valid App ID')
@@ -366,6 +282,7 @@ const FoodSafety = ({ openModal, closeModal }: FoodSafetyProps) => {
   }
 
   const recallBatch = async () => {
+    if (role !== 'retailer') throw new Error('Only retailers can recall batches')
     try {
       if (!activeAddress || !transactionSigner) throw new Error('Connect wallet')
       if (!appId || appId <= 0) throw new Error('Enter valid App ID')
@@ -447,7 +364,7 @@ const FoodSafety = ({ openModal, closeModal }: FoodSafetyProps) => {
   return (
     <dialog id="foodsafety_modal" className={`modal ${openModal ? 'modal-open' : ''} bg-slate-200`}>
       <form method="dialog" className="modal-box max-w-5xl max-h-[90vh] overflow-y-auto">
-        <h3 className="font-bold text-lg mb-4">AgriTrust - Food Safety & Traceability</h3>
+        <h3 className="font-bold text-lg mb-4">AgriTrust - Food Safety & Traceability {role && `(${ROLES[role]})`}</h3>
         
         {/* Display connected account */}
         {activeAddress && (
@@ -482,165 +399,166 @@ const FoodSafety = ({ openModal, closeModal }: FoodSafetyProps) => {
           )}
           
           {/* Deploy Section */}
-          <div className="card bg-base-200">
-            <div className="card-body">
-              <h4 className="card-title">Deploy Contract</h4>
-              <div className="flex gap-2">
-                <input
-                  className="input input-bordered flex-1"
-                  type="number"
-                  value={appId}
-                  onChange={(e) => setAppId(e.target.value === '' ? '' : Number(e.target.value))}
-                  placeholder="Enter deployed App ID"
-                />
-                <button
-                  className={`btn btn-primary ${deploying ? 'loading' : ''}`}
-                  disabled={deploying || !activeAddress}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    void deployContract()
-                  }}
-                >
-                  Deploy
-                </button>
+          {role === 'supplier' && (
+            <div className="card bg-base-200">
+              <div className="card-body">
+                <h4 className="card-title">Deploy Contract</h4>
+                <div className="flex gap-2">
+                  <input
+                    className="input input-bordered flex-1"
+                    type="number"
+                    value={appId}
+                    onChange={(e) => setAppId(e.target.value === '' ? '' : Number(e.target.value))}
+                    placeholder="Enter deployed App ID"
+                  />
+                  <button
+                    className={`btn btn-primary ${deploying ? 'loading' : ''}`}
+                    disabled={deploying || !activeAddress}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      void deployContract()
+                    }}
+                  >
+                    Deploy
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Create Batch */}
-          <div className="card bg-base-200">
-            <div className="card-body">
-              <h4 className="card-title">Create Batch (Producer)</h4>
-              <div className="grid grid-cols-2 gap-2">
-                <input className="input input-bordered" placeholder="Batch ID" value={batchId} onChange={(e) => setBatchId(e.target.value)} />
-                <input className="input input-bordered" placeholder="Product Name" value={productName} onChange={(e) => setProductName(e.target.value)} />
-                <input className="input input-bordered" placeholder="Origin Location" value={originLocation} onChange={(e) => setOriginLocation(e.target.value)} />
-                <input className="input input-bordered" type="date" placeholder="Harvest Date" value={harvestDate} onChange={(e) => setHarvestDate(e.target.value)} />
-                <input className="input input-bordered col-span-2" type="file" onChange={(e) => setIpfsFile(e.target.files?.[0] || null)} />
-                <button
-                  className={`btn btn-success col-span-2 ${loading ? 'loading' : ''}`}
-                  disabled={loading || !activeAddress || !appId}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    void createBatch()
-                  }}
-                >
-                  Create Batch
-                </button>
-                <button
-                  className={`btn btn-accent col-span-2 ${deploying || loading ? 'loading' : ''}`}
-                  disabled={deploying || loading || !activeAddress}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    void deployAndCreateBatch()
-                  }}
-                >
-                  🚀 Deploy Contract & Create First Batch (All-in-One)
-                </button>
+          {canPerformAction('create_batch') && (
+            <div className="card bg-base-200">
+              <div className="card-body">
+                <h4 className="card-title">Create Batch (Supplier)</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <input className="input input-bordered" placeholder="Batch ID" value={batchId} onChange={(e) => setBatchId(e.target.value)} />
+                  <input className="input input-bordered" placeholder="Product Name" value={productName} onChange={(e) => setProductName(e.target.value)} />
+                  <input className="input input-bordered" placeholder="Origin Location" value={originLocation} onChange={(e) => setOriginLocation(e.target.value)} />
+                  <input className="input input-bordered" type="date" placeholder="Harvest Date" value={harvestDate} onChange={(e) => setHarvestDate(e.target.value)} />
+                  <input className="input input-bordered col-span-2" type="file" onChange={(e) => setIpfsFile(e.target.files?.[0] || null)} />
+                  <button
+                    className={`btn btn-success col-span-2 ${loading ? 'loading' : ''}`}
+                    disabled={loading || !activeAddress || !appId}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      void createBatch()
+                    }}
+                  >
+                    Create Batch
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Inspect Batch */}
-          <div className="card bg-base-200">
-            <div className="card-body">
-              <h4 className="card-title">Inspect Batch (Inspector)</h4>
-              <div className="flex flex-col gap-2">
-                <input className="input input-bordered" placeholder="Batch ID" value={inspectBatchId} onChange={(e) => setInspectBatchId(e.target.value)} />
-                <div className="form-control">
-                  <label className="label cursor-pointer">
-                    <span className="label-text">Approved</span>
-                    <input type="checkbox" className="toggle" checked={inspectionApproved} onChange={(e) => setInspectionApproved(e.target.checked)} />
-                  </label>
+          {canPerformAction('inspect_batch') && (
+            <div className="card bg-base-200">
+              <div className="card-body">
+                <h4 className="card-title">Inspect Batch (Approver)</h4>
+                <div className="flex flex-col gap-2">
+                  <input className="input input-bordered" placeholder="Batch ID" value={inspectBatchId} onChange={(e) => setInspectBatchId(e.target.value)} />
+                  <div className="form-control">
+                    <label className="label cursor-pointer">
+                      <span className="label-text">Approved</span>
+                      <input type="checkbox" className="toggle" checked={inspectionApproved} onChange={(e) => setInspectionApproved(e.target.checked)} />
+                    </label>
+                  </div>
+                  <input className="input input-bordered" type="file" onChange={(e) => setInspectionFile(e.target.files?.[0] || null)} />
+                  <button
+                    className={`btn btn-warning ${loading ? 'loading' : ''}`}
+                    disabled={loading || !activeAddress || !appId}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      void inspectBatch()
+                    }}
+                  >
+                    Inspect Batch
+                  </button>
                 </div>
-                <input className="input input-bordered" type="file" onChange={(e) => setInspectionFile(e.target.files?.[0] || null)} />
-                <button
-                  className={`btn btn-warning ${loading ? 'loading' : ''}`}
-                  disabled={loading || !activeAddress || !appId}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    void inspectBatch()
-                  }}
-                >
-                  Inspect Batch
-                </button>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Distribute Batch */}
-          <div className="card bg-base-200">
-            <div className="card-body">
-              <h4 className="card-title">Distribute Batch (Distributor)</h4>
-              <div className="flex gap-2">
-                <input className="input input-bordered flex-1" placeholder="Batch ID" value={distributeBatchId} onChange={(e) => setDistributeBatchId(e.target.value)} />
-                <button
-                  className={`btn btn-info ${loading ? 'loading' : ''}`}
-                  disabled={loading || !activeAddress || !appId}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    void distributeBatch()
-                  }}
-                >
-                  Distribute
-                </button>
+          {canPerformAction('distribute_batch') && (
+            <div className="card bg-base-200">
+              <div className="card-body">
+                <h4 className="card-title">Distribute Batch (Distributor)</h4>
+                <div className="flex gap-2">
+                  <input className="input input-bordered flex-1" placeholder="Batch ID" value={distributeBatchId} onChange={(e) => setDistributeBatchId(e.target.value)} />
+                  <button
+                    className={`btn btn-info ${loading ? 'loading' : ''}`}
+                    disabled={loading || !activeAddress || !appId}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      void distributeBatch()
+                    }}
+                  >
+                    Distribute
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Recall Batch */}
-          <div className="card bg-base-200">
-            <div className="card-body">
-              <h4 className="card-title">Recall Batch (Regulator)</h4>
-              <div className="flex flex-col gap-2">
-                <input className="input input-bordered" placeholder="Batch ID" value={recallBatchId} onChange={(e) => setRecallBatchId(e.target.value)} />
-                <textarea className="textarea textarea-bordered" placeholder="Recall Reason" value={recallReason} onChange={(e) => setRecallReason(e.target.value)} />
-                <button
-                  className={`btn btn-error ${loading ? 'loading' : ''}`}
-                  disabled={loading || !activeAddress || !appId}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    void recallBatch()
-                  }}
-                >
-                  Recall Batch
-                </button>
+          {canPerformAction('recall_batch') && (
+            <div className="card bg-base-200">
+              <div className="card-body">
+                <h4 className="card-title">Recall Batch (Retailer)</h4>
+                <div className="flex flex-col gap-2">
+                  <input className="input input-bordered" placeholder="Batch ID" value={recallBatchId} onChange={(e) => setRecallBatchId(e.target.value)} />
+                  <textarea className="textarea textarea-bordered" placeholder="Recall Reason" value={recallReason} onChange={(e) => setRecallReason(e.target.value)} />
+                  <button
+                    className={`btn btn-error ${loading ? 'loading' : ''}`}
+                    disabled={loading || !activeAddress || !appId}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      void recallBatch()
+                    }}
+                  >
+                    Recall Batch
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* View Batch */}
-          <div className="card bg-base-200">
-            <div className="card-body">
-              <h4 className="card-title">View Batch</h4>
-              <div className="flex gap-2">
-                <input className="input input-bordered flex-1" placeholder="Batch ID" value={viewBatchId} onChange={(e) => setViewBatchId(e.target.value)} />
-                <button
-                  className={`btn btn-secondary ${loading ? 'loading' : ''}`}
-                  disabled={loading || !appId}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    void viewBatch()
-                  }}
-                >
-                  View
-                </button>
-              </div>
-              {batchInfo && (
-                <div className="mt-4 p-4 bg-base-300 rounded">
-                  <p><strong>Batch ID:</strong> {batchInfo.batchId}</p>
-                  <p><strong>Producer:</strong> {batchInfo.producer}</p>
-                  <p><strong>Product:</strong> {batchInfo.productName}</p>
-                  <p><strong>Origin:</strong> {batchInfo.originLocation}</p>
-                  <p><strong>Harvest Date:</strong> {new Date(Number(batchInfo.harvestDate) * 1000).toLocaleDateString()}</p>
-                  <p><strong>Status:</strong> <span className={`badge ${batchInfo.status === 'APPROVED' ? 'badge-success' : batchInfo.status === 'REJECTED' || batchInfo.status === 'RECALLED' ? 'badge-error' : 'badge-warning'}`}>{batchInfo.status}</span></p>
-                  {batchInfo.ipfsHash && <p><strong>IPFS Hash:</strong> <a href={`https://ipfs.io/ipfs/${batchInfo.ipfsHash}`} target="_blank" rel="noopener noreferrer" className="link">{batchInfo.ipfsHash}</a></p>}
-                  {batchInfo.inspectionReportHash && <p><strong>Inspection Report:</strong> <a href={`https://ipfs.io/ipfs/${batchInfo.inspectionReportHash}`} target="_blank" rel="noopener noreferrer" className="link">{batchInfo.inspectionReportHash}</a></p>}
+          {canPerformAction('view_batch') && (
+            <div className="card bg-base-200">
+              <div className="card-body">
+                <h4 className="card-title">View Batch</h4>
+                <div className="flex gap-2">
+                  <input className="input input-bordered flex-1" placeholder="Batch ID" value={viewBatchId} onChange={(e) => setViewBatchId(e.target.value)} />
+                  <button
+                    className={`btn btn-secondary ${loading ? 'loading' : ''}`}
+                    disabled={loading || !appId}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      void viewBatch()
+                    }}
+                  >
+                    View
+                  </button>
                 </div>
-              )}
+                {batchInfo && (
+                  <div className="mt-4 p-4 bg-base-300 rounded">
+                    <p><strong>Batch ID:</strong> {batchInfo.batchId}</p>
+                    <p><strong>Producer:</strong> {batchInfo.producer}</p>
+                    <p><strong>Product:</strong> {batchInfo.productName}</p>
+                    <p><strong>Origin:</strong> {batchInfo.originLocation}</p>
+                    <p><strong>Harvest Date:</strong> {new Date(Number(batchInfo.harvestDate) * 1000).toLocaleDateString()}</p>
+                    <p><strong>Status:</strong> <span className={`badge ${batchInfo.status === 'APPROVED' ? 'badge-success' : batchInfo.status === 'REJECTED' || batchInfo.status === 'RECALLED' ? 'badge-error' : 'badge-warning'}`}>{batchInfo.status}</span></p>
+                    {batchInfo.ipfsHash && <p><strong>IPFS Hash:</strong> <a href={`https://ipfs.io/ipfs/${batchInfo.ipfsHash}`} target="_blank" rel="noopener noreferrer" className="link">{batchInfo.ipfsHash}</a></p>}
+                    {batchInfo.inspectionReportHash && <p><strong>Inspection Report:</strong> <a href={`https://ipfs.io/ipfs/${batchInfo.inspectionReportHash}`} target="_blank" rel="noopener noreferrer" className="link">{batchInfo.inspectionReportHash}</a></p>}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-
+          )}
           <div className="modal-action">
             <button className="btn" onClick={closeModal} disabled={loading}>Close</button>
           </div>

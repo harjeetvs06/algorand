@@ -3,16 +3,28 @@ import { useWallet } from '@txnlab/use-wallet-react'
 import React, { useState } from 'react'
 import ConnectWallet from './components/ConnectWallet'
 import FoodSafety from './components/FoodSafety'
+import { Role, ROLES } from './types/roles'
 
 interface HomeProps {}
 
 const Home: React.FC<HomeProps> = () => {
   const [openWalletModal, setOpenWalletModal] = useState<boolean>(false)
+  const [selectedRole, setSelectedRole] = useState<Role | null>(null)
   const [foodSafetyModal, setFoodSafetyModal] = useState<boolean>(false)
   const { activeAddress } = useWallet()
 
   const toggleWalletModal = () => {
     setOpenWalletModal(!openWalletModal)
+  }
+
+  const handleRoleSelect = (role: Role) => {
+    setSelectedRole(role)
+  }
+
+  const openFoodSafety = () => {
+    if (selectedRole) {
+      setFoodSafetyModal(true)
+    }
   }
 
   return (
@@ -38,30 +50,79 @@ const Home: React.FC<HomeProps> = () => {
             Food Safety & Traceability on Algorand
           </p>
 
-          <div className="grid grid-cols-1 gap-4 sm:gap-6">
-            <div className="card bg-gradient-to-br from-green-600 to-emerald-600 text-white shadow-xl">
-              <div className="card-body p-4 sm:p-6">
-                <h2 className="card-title text-lg sm:text-xl">Food Safety System</h2>
-                <p className="text-sm sm:text-base">
-                  Create batches, inspect, distribute, and recall food products with blockchain traceability.
-                </p>
-                <div className="card-actions justify-end mt-2">
-                  <button 
-                    className="btn btn-outline btn-sm sm:btn-md" 
-                    disabled={!activeAddress} 
-                    onClick={() => setFoodSafetyModal(true)}
-                  >
-                    Open
-                  </button>
+          {activeAddress ? (
+            <>
+              <div className="alert alert-info mb-4">
+                <div>
+                  <span className="font-semibold">Connected Account:</span>
+                  <br />
+                  <span className="text-xs font-mono">{activeAddress}</span>
+                </div>
+              </div>
+
+              {!selectedRole ? (
+                <div className="grid grid-cols-1 gap-4 sm:gap-6">
+                  <div className="card bg-gradient-to-br from-green-600 to-emerald-600 text-white shadow-xl">
+                    <div className="card-body p-4 sm:p-6">
+                      <h2 className="card-title text-lg sm:text-xl">Select Your Role</h2>
+                      <p className="text-sm sm:text-base">
+                        Choose your role in the supply chain to access relevant actions.
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 mt-4">
+                        {Object.entries(ROLES).map(([key, label]) => (
+                          <button
+                            key={key}
+                            className="btn btn-outline btn-sm sm:btn-md"
+                            onClick={() => handleRoleSelect(key as Role)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4 sm:gap-6">
+                  <div className="card bg-gradient-to-br from-blue-600 to-cyan-600 text-white shadow-xl">
+                    <div className="card-body p-4 sm:p-6">
+                      <h2 className="card-title text-lg sm:text-xl">Role: {ROLES[selectedRole]}</h2>
+                      <p className="text-sm sm:text-base">
+                        Access your role-specific actions in the food safety system.
+                      </p>
+                      <div className="card-actions justify-end mt-2">
+                        <button
+                          className="btn btn-outline btn-sm sm:btn-md"
+                          onClick={() => openFoodSafety()}
+                        >
+                          Open Dashboard
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:gap-6">
+              <div className="card bg-gradient-to-br from-green-600 to-emerald-600 text-white shadow-xl">
+                <div className="card-body p-4 sm:p-6">
+                  <h2 className="card-title text-lg sm:text-xl">Food Safety System</h2>
+                  <p className="text-sm sm:text-base">
+                    Create batches, inspect, distribute, and recall food products with blockchain traceability.
+                  </p>
+                  <div className="card-actions justify-end mt-2">
+                    <p className="text-sm">Connect your wallet to get started.</p>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
       <ConnectWallet openModal={openWalletModal} closeModal={toggleWalletModal} />
-      <FoodSafety openModal={foodSafetyModal} closeModal={() => setFoodSafetyModal(false)} />
+      <FoodSafety openModal={foodSafetyModal} closeModal={() => setFoodSafetyModal(false)} role={selectedRole} />
     </div>
   )
 }
