@@ -68,45 +68,24 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
   // View batch form
   const [viewBatchId, setViewBatchId] = useState<string>('')
   const [batchInfo, setBatchInfo] = useState<BatchInfo | null>(null)
-  const [funding, setFunding] = useState<boolean>(false)
   const allowedActions = role ? ROLE_ACTIONS[role] : []
 
   const canPerformAction = (action: string) => allowedActions.includes(action)
 
-  const fundAccount = async () => {
-    try {
-      if (!activeAddress) throw new Error('Connect wallet')
-      if (algodConfig.network !== 'localnet') {
-        throw new Error('Auto-funding only works on LocalNet. For TestNet, use https://bank.testnet.algorand.network/')
-      }
-      
-      setFunding(true)
-      
-      // Use dispenser account to fund the connected account
-      const dispenser = await algorand.account.dispenserFromEnvironment()
-      
-      await algorand.send.payment({
-        sender: dispenser.addr,
-        receiver: activeAddress,
-        amount: (10).algos(),
-        signer: dispenser.signer,
-      })
-      
-      enqueueSnackbar(`Funded ${activeAddress} with 10 ALGO`, { variant: 'success' })
-    } catch (e) {
-      enqueueSnackbar(`Fund failed: ${(e as Error).message}`, { variant: 'error' })
-    } finally {
-      setFunding(false)
-    }
-  }
-
   const deployContract = async () => {
     if (role !== 'supplier') throw new Error('Only suppliers can deploy contracts')
     try {
-      if (!activeAddress) throw new Error('Connect wallet')
+      if (!activeAddress || !transactionSigner) throw new Error('Connect Pera Wallet')
       setDeploying(true)
-      const factory = new FoodSafetyAppFactory({ defaultSender: activeAddress, algorand })
-      const result = await factory.send.create.bare()
+      const factory = new FoodSafetyAppFactory({
+        defaultSender: activeAddress,
+        defaultSigner: transactionSigner,
+        algorand,
+      })
+      const result = await factory.send.create.bare({
+        sender: activeAddress,
+        signer: transactionSigner,
+      })
       const newId = Number(result.appClient.appId)
       setAppId(newId)
       enqueueSnackbar(`FoodSafety deployed. App ID: ${newId}`, { variant: 'success' })
@@ -378,26 +357,6 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
         )}
         
         <div className="flex flex-col gap-4">
-          {/* Fund Account Section (LocalNet only) */}
-          {algodConfig.network === 'localnet' && (
-            <div className="card bg-warning bg-opacity-20">
-              <div className="card-body">
-                <h4 className="card-title text-sm">Need ALGO? (LocalNet Only)</h4>
-                <p className="text-xs">If you get "balance below min" errors, click here to fund your account:</p>
-                <button
-                  className={`btn btn-warning btn-sm ${funding ? 'loading' : ''}`}
-                  disabled={funding || !activeAddress}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    void fundAccount()
-                  }}
-                >
-                  Fund My Account with 10 ALGO
-                </button>
-              </div>
-            </div>
-          )}
-          
           {/* Deploy Section */}
           {role === 'supplier' && (
             <div className="card bg-base-200">
@@ -413,7 +372,7 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
                   />
                   <button
                     className={`btn btn-primary ${deploying ? 'loading' : ''}`}
-                    disabled={deploying || !activeAddress}
+                    disabled={deploying || !activeAddress || !transactionSigner}
                     onClick={(e) => {
                       e.preventDefault()
                       void deployContract()

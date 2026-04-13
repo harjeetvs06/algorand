@@ -12,11 +12,6 @@ interface ImportMetaEnv {
   readonly VITE_INDEXER_SERVER: string
   readonly VITE_INDEXER_PORT: string
 
-  readonly VITE_KMD_TOKEN: string
-  readonly VITE_KMD_SERVER: string
-  readonly VITE_KMD_PORT: string
-  readonly VITE_KMD_PASSWORD: string
-  readonly VITE_KMD_WALLET: string
   readonly VITE_PINATA_JWT?: string
   readonly VITE_PINATA_GATEWAY?: string
 }

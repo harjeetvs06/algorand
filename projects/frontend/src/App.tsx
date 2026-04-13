@@ -2,39 +2,16 @@ import { SupportedWallet, WalletId, WalletManager, WalletProvider } from '@txnla
 import { SnackbarProvider } from 'notistack'
 import { PeraWalletConnect } from '@perawallet/connect'
 import Home from './Home'
-import { getAlgodConfigFromViteEnvironment, getKmdConfigFromViteEnvironment } from './utils/network/getAlgoClientConfigs'
+import { getAlgodConfigFromViteEnvironment } from './utils/network/getAlgoClientConfigs'
 
-let supportedWallets: SupportedWallet[]
-if (import.meta.env.VITE_ALGOD_NETWORK === 'localnet') {
-  const kmdConfig = getKmdConfigFromViteEnvironment()
-  supportedWallets = [
-    {
-      id: WalletId.PERA,
-      options: {
-        clientStatic: PeraWalletConnect,
-      },
+const supportedWallets: SupportedWallet[] = [
+  {
+    id: WalletId.PERA,
+    options: {
+      clientStatic: PeraWalletConnect,
     },
-    {
-      id: WalletId.KMD,
-      options: {
-        baseServer: kmdConfig.server,
-        token: String(kmdConfig.token),
-        port: String(kmdConfig.port),
-        wallet: kmdConfig.wallet,
-        password: kmdConfig.password,
-      },
-    },
-  ]
-} else {
-  supportedWallets = [
-    { id: WalletId.DEFLY },
-    { id: WalletId.PERA },
-    { id: WalletId.EXODUS },
-    { id: WalletId.LUTE },
-    // If you are interested in WalletConnect v2 provider
-    // refer to https://github.com/TxnLab/use-wallet for detailed integration instructions
-  ]
-}
+  },
+]
 
 export default function App() {
   const algodConfig = getAlgodConfigFromViteEnvironment()

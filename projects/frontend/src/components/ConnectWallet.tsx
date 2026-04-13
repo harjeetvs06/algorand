@@ -9,17 +9,14 @@ interface ConnectWalletInterface {
 const ConnectWallet = ({ openModal, closeModal }: ConnectWalletInterface) => {
   const { wallets, activeAddress } = useWallet()
 
-  const isKmd = (wallet: Wallet) => wallet.id === WalletId.KMD
   const isPera = (wallet: Wallet) => wallet.id === WalletId.PERA
 
   const getWalletDisplayName = (wallet: Wallet) => {
-    if (isKmd(wallet)) return 'Local Wallet'
     if (isPera(wallet)) return 'Pera Wallet'
     return wallet.metadata.name
   }
 
   const getWalletDescription = (wallet: Wallet) => {
-    if (isKmd(wallet)) return 'Development wallet (LocalNet)'
     if (isPera(wallet)) return 'Mobile and web wallet'
     return ''
   }
@@ -48,17 +45,11 @@ const ConnectWallet = ({ openModal, closeModal }: ConnectWalletInterface) => {
                 }}
               >
                 <div className="flex items-center gap-3 w-full">
-                  {isKmd(wallet) ? (
-                    <div className="w-[30px] h-[30px] flex items-center justify-center text-2xl">
-                      💼
-                    </div>
-                  ) : (
-                    <img
-                      alt={`wallet_icon_${wallet.id}`}
-                      src={wallet.metadata.icon}
-                      style={{ objectFit: 'contain', width: '30px', height: '30px' }}
-                    />
-                  )}
+                  <img
+                    alt={`wallet_icon_${wallet.id}`}
+                    src={wallet.metadata.icon}
+                    style={{ objectFit: 'contain', width: '30px', height: '30px' }}
+                  />
                   <div className="flex flex-col items-start">
                     <span className="font-semibold">{getWalletDisplayName(wallet)}</span>
                     {getWalletDescription(wallet) && (
@@ -90,9 +81,6 @@ const ConnectWallet = ({ openModal, closeModal }: ConnectWalletInterface) => {
                   if (activeWallet) {
                     await activeWallet.disconnect()
                   } else {
-                    // Required for logout/cleanup of inactive providers
-                    // For instance, when you login to localnet wallet and switch network
-                    // to testnet/mainnet or vice verse.
                     localStorage.removeItem('@txnlab/use-wallet:v3')
                     window.location.reload()
                   }
