@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useWallet } from '@txnlab/use-wallet-react'
 import { useSnackbar } from 'notistack'
 import { AlgorandClient } from '@algorandfoundation/algokit-utils'
@@ -42,7 +42,7 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
   const indexerConfig = getIndexerConfigFromViteEnvironment()
   const algorand = useMemo(() => AlgorandClient.fromConfig({ algodConfig, indexerConfig }), [algodConfig, indexerConfig])
   
-  const [appId, setAppId] = useState<number | ''>(0)
+  const [appId, setAppId] = useState<number | ''>('')
   const [deploying, setDeploying] = useState<boolean>(false)
   const [loading, setLoading] = useState<boolean>(false)
   
@@ -55,7 +55,7 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
   
   // Inspect batch form
   const [inspectBatchId, setInspectBatchId] = useState<string>('')
-  const [inspectionApproved, setInspectionApproved] = useState<boolean>(true)
+  const [inspectionApproved, setInspectionApproved] = useState<boolean | null>(null)
   const [inspectionFile, setInspectionFile] = useState<File | null>(null)
   
   // Distribute batch form
@@ -69,8 +69,33 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
   const [viewBatchId, setViewBatchId] = useState<string>('')
   const [batchInfo, setBatchInfo] = useState<BatchInfo | null>(null)
   const allowedActions = role ? ROLE_ACTIONS[role] : []
+  const isInspectionReady =
+    Boolean(activeAddress && transactionSigner) &&
+    inspectBatchId.trim().length > 0 &&
+    inspectionApproved !== null &&
+    inspectionFile instanceof File
 
   const canPerformAction = (action: string) => allowedActions.includes(action)
+
+  const updateAppId = (value: string) => {
+    setAppId(value === '' ? '' : Number(value))
+  }
+
+  const updateInspectionFile = (files: FileList | null) => {
+    setInspectionFile(files?.[0] ?? null)
+  }
+
+  const getFoodSafetyClient = () => {
+    if (!activeAddress || !transactionSigner) throw new Error('Connect wallet')
+    if (!appId || appId <= 0) throw new Error('Enter valid App ID')
+
+    return new FoodSafetyAppClient({
+      appId: BigInt(appId),
+      algorand,
+      defaultSender: activeAddress,
+      defaultSigner: transactionSigner,
+    })
+  }
 
   const deployContract = async () => {
     if (role !== 'supplier') throw new Error('Only suppliers can deploy contracts')
@@ -122,9 +147,6 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
       
       harvestTimestamp = Math.floor(new Date(harvestDate).getTime() / 1000)
       
-      // Set the signer
-      algorand.setDefaultSigner(transactionSigner)
-      
       // Get app address using algosdk (NOT the creator address!)
       const appAddress = algosdk.getApplicationAddress(Number(appId))
       
@@ -144,12 +166,7 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
       
       console.log('MBR payment sent, now creating batch...')
       
-      // Create client
-      const client = new FoodSafetyAppClient({
-        appId: BigInt(appId),
-        sender: activeAddress,
-        algorand,
-      })
+      const client = getFoodSafetyClient()
       
       // Call createBatch - MBR is already paid
       await client.send.createBatch({
@@ -187,30 +204,15 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
       if (!activeAddress || !transactionSigner) throw new Error('Connect wallet')
       if (!appId || appId <= 0) throw new Error('Enter valid App ID')
       if (!inspectBatchId) throw new Error('Enter batch ID')
+      if (inspectionApproved === null) throw new Error('Choose approval status')
+      if (!inspectionFile) throw new Error('Select inspection report file')
       
       setLoading(true)
       
-      // Upload inspection report to IPFS if provided
-      let inspectionHash = ''
-      if (inspectionFile) {
-        const result = await pinFileToIPFS(inspectionFile)
-        inspectionHash = result.IpfsHash
-      } else {
-        // Create a simple JSON report
-        const report = {
-          approved: inspectionApproved,
-          timestamp: new Date().toISOString(),
-          inspector: activeAddress,
-        }
-        const result = await pinJSONToIPFS(report)
-        inspectionHash = result.IpfsHash
-      }
+      const result = await pinFileToIPFS(inspectionFile)
+      const inspectionHash = result.IpfsHash
       
-      const client = new FoodSafetyAppClient({
-        appId: BigInt(appId),
-        algorand,
-        defaultSigner: transactionSigner,
-      })
+      const client = getFoodSafetyClient()
       
       await client.send.inspectBatch({
         args: {
@@ -219,10 +221,12 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
           approved: BigInt(inspectionApproved ? 1 : 0),
         },
         sender: activeAddress,
+        signer: transactionSigner,
       })
       
       enqueueSnackbar(`Batch ${inspectBatchId} inspected successfully`, { variant: 'success' })
       setInspectBatchId('')
+      setInspectionApproved(null)
       setInspectionFile(null)
     } catch (e) {
       enqueueSnackbar(`Inspect batch failed: ${(e as Error).message}`, { variant: 'error' })
@@ -240,15 +244,12 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
       
       setLoading(true)
       
-      const client = new FoodSafetyAppClient({
-        appId: BigInt(appId),
-        algorand,
-        defaultSigner: transactionSigner,
-      })
+      const client = getFoodSafetyClient()
       
       await client.send.distributeBatch({
         args: { batchId: distributeBatchId },
         sender: activeAddress,
+        signer: transactionSigner,
       })
       
       enqueueSnackbar(`Batch ${distributeBatchId} distributed successfully`, { variant: 'success' })
@@ -277,11 +278,7 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
       }
       const result = await pinJSONToIPFS(recallData)
       
-      const client = new FoodSafetyAppClient({
-        appId: BigInt(appId),
-        algorand,
-        defaultSigner: transactionSigner,
-      })
+      const client = getFoodSafetyClient()
       
       await client.send.recallBatch({
         args: {
@@ -289,6 +286,7 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
           reasonHash: result.IpfsHash,
         },
         sender: activeAddress,
+        signer: transactionSigner,
       })
       
       enqueueSnackbar(`Batch ${recallBatchId} recalled successfully`, { variant: 'success' })
@@ -303,18 +301,18 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
 
   const viewBatch = async () => {
     try {
+      if (!activeAddress || !transactionSigner) throw new Error('Connect wallet')
       if (!appId || appId <= 0) throw new Error('Enter valid App ID')
       if (!viewBatchId) throw new Error('Enter batch ID')
       
       setLoading(true)
       
-      const client = new FoodSafetyAppClient({
-        appId: BigInt(appId),
-        algorand,
-        defaultSigner: transactionSigner,
-      })
+      const client = getFoodSafetyClient()
       
-      const result = await client.getBatch({ args: { batchId: viewBatchId } })
+      const result = await client.getBatch({
+        args: { batchId: viewBatchId },
+        sender: activeAddress,
+      })
       
       // getBatch returns a tuple: [batchId, producer, productName, originLocation, harvestDate, status, ipfsHash, inspectionReportHash]
       const [retBatchId, producer, productName, originLocation, harvestDate, status, ipfsHash, inspectionReportHash] = result
@@ -355,6 +353,19 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
             </div>
           </div>
         )}
+
+        <div className="card bg-base-200 mb-4">
+          <div className="card-body">
+            <h4 className="card-title">Contract App ID</h4>
+            <input
+              className="input input-bordered"
+              type="number"
+              value={appId}
+              onChange={(e) => updateAppId(e.target.value)}
+              placeholder="Enter deployed App ID"
+            />
+          </div>
+        </div>
         
         <div className="flex flex-col gap-4">
           {/* Deploy Section */}
@@ -363,15 +374,8 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
               <div className="card-body">
                 <h4 className="card-title">Deploy Contract</h4>
                 <div className="flex gap-2">
-                  <input
-                    className="input input-bordered flex-1"
-                    type="number"
-                    value={appId}
-                    onChange={(e) => setAppId(e.target.value === '' ? '' : Number(e.target.value))}
-                    placeholder="Enter deployed App ID"
-                  />
                   <button
-                    className={`btn btn-primary ${deploying ? 'loading' : ''}`}
+                    className={`btn btn-primary flex-1 ${deploying ? 'loading' : ''}`}
                     disabled={deploying || !activeAddress || !transactionSigner}
                     onClick={(e) => {
                       e.preventDefault()
@@ -421,13 +425,18 @@ const FoodSafety = ({ openModal, closeModal, role }: FoodSafetyProps) => {
                   <div className="form-control">
                     <label className="label cursor-pointer">
                       <span className="label-text">Approved</span>
-                      <input type="checkbox" className="toggle" checked={inspectionApproved} onChange={(e) => setInspectionApproved(e.target.checked)} />
+                      <input
+                        type="checkbox"
+                        className="toggle"
+                        checked={inspectionApproved ?? false}
+                        onChange={(e) => setInspectionApproved(e.target.checked)}
+                      />
                     </label>
                   </div>
-                  <input className="input input-bordered" type="file" onChange={(e) => setInspectionFile(e.target.files?.[0] || null)} />
+                  <input className="input input-bordered" type="file" onChange={(e) => updateInspectionFile(e.target.files)} />
                   <button
                     className={`btn btn-warning ${loading ? 'loading' : ''}`}
-                    disabled={loading || !activeAddress || !appId}
+                    disabled={loading || !isInspectionReady}
                     onClick={(e) => {
                       e.preventDefault()
                       void inspectBatch()
